@@ -7,6 +7,10 @@ import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { unityAnimParser, type AnimationData } from '@/lib/unity-anim-parser';
 import { type AnimationMapping } from '@/lib/emotion-mapping';
+import CosmicAquarium, { type QualityLevel } from './CosmicAquarium';
+
+// Re-export QualityLevel for use in other components
+export type { QualityLevel } from './CosmicAquarium';
 
 interface JammoModelProps {
   currentAnimation: string;
@@ -323,29 +327,16 @@ function JammoModel({
   return <group ref={groupRef} position={[0, 0.5, 0]} />;
 }
 
-// Scene component with lighting and ground
-function Scene(props: JammoModelProps) {
+// Scene component with cosmic aquarium environment
+interface SceneProps extends JammoModelProps {
+  quality: QualityLevel;
+}
+
+function Scene({ quality, ...props }: SceneProps) {
   return (
     <>
-      {/* Lighting */}
-      <ambientLight intensity={0.4} />
-      <directionalLight
-        position={[5, 10, 7]}
-        intensity={1}
-        castShadow
-        shadow-mapSize={[2048, 2048]}
-      />
-      <directionalLight position={[-5, 5, -5]} intensity={0.3} color="#8888ff" />
-      <directionalLight position={[0, 5, -10]} intensity={0.2} color="#ff8888" />
-
-      {/* Ground */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-        <circleGeometry args={[5, 64]} />
-        <meshStandardMaterial color="#16213e" roughness={0.8} metalness={0.2} />
-      </mesh>
-
-      {/* Grid */}
-      <gridHelper args={[10, 20, '#0f3460', '#0f3460']} position={[0, 0.01, 0]} />
+      {/* Cosmic Aquarium Environment */}
+      <CosmicAquarium quality={quality} robotAction={props.currentAnimation} />
 
       {/* Robot */}
       <JammoModel {...props} />
@@ -354,7 +345,7 @@ function Scene(props: JammoModelProps) {
       <OrbitControls
         target={[0, 1, 0]}
         minDistance={1.5}
-        maxDistance={10}
+        maxDistance={15}
         maxPolarAngle={Math.PI * 0.85}
         enableDamping
         dampingFactor={0.05}
@@ -383,9 +374,10 @@ export interface RobotControllerRef {
 
 interface Robot3DProps {
   className?: string;
+  quality?: QualityLevel;
 }
 
-const Robot3D = forwardRef<RobotControllerRef, Robot3DProps>(function Robot3D({ className }, ref) {
+const Robot3D = forwardRef<RobotControllerRef, Robot3DProps>(function Robot3D({ className, quality = 'medium' }, ref) {
   const [currentAnimation, setCurrentAnimation] = useState('a_Idle');
   const [animationSpeed, setAnimationSpeed] = useState(1);
   const [emotionGlow, setEmotionGlow] = useState<string | null>(null);
@@ -415,19 +407,20 @@ const Robot3D = forwardRef<RobotControllerRef, Robot3DProps>(function Robot3D({ 
   }));
 
   return (
-    <div className={className}>
+    <div className={className} style={{ background: '#0a0a1a' }}>
       <Canvas
         shadows
         camera={{ position: [0, 1.5, 4], fov: 45 }}
-        style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)' }}
-        gl={{ antialias: true, powerPreference: 'default' }}
+        gl={{ antialias: true, powerPreference: 'default', alpha: true }}
         onCreated={({ gl }) => {
           gl.toneMapping = THREE.ACESFilmicToneMapping;
           gl.toneMappingExposure = 1.2;
+          gl.setClearColor(0x000000, 0); // Transparent background
         }}
       >
         <Suspense fallback={<LoadingFallback />}>
           <Scene
+            quality={quality}
             currentAnimation={currentAnimation}
             animationSpeed={animationSpeed}
             emotionGlow={emotionGlow}

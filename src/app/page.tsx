@@ -11,7 +11,7 @@ import {
   getPrimaryAction,
   type ParsedAction,
 } from '@/lib/emotion-mapping';
-import type { RobotControllerRef } from '@/components/Robot3D';
+import type { RobotControllerRef, QualityLevel } from '@/components/Robot3D';
 
 // Dynamic import for the 3D component (client-side only)
 const Robot3D = dynamic(() => import('@/components/Robot3D'), { 
@@ -102,6 +102,7 @@ export default function Home() {
   const [currentEmotion, setCurrentEmotion] = useState<Emotion | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const [quality, setQuality] = useState<QualityLevel>('medium');
   
   const robotRef = useRef<RobotControllerRef>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -354,7 +355,7 @@ export default function Home() {
     <div className="flex h-screen bg-[#1a1a2e]">
       {/* 3D Robot Viewer */}
       <div className="flex-1 relative">
-        <Robot3D ref={robotRef} className="w-full h-full" />
+        <Robot3D ref={robotRef} className="w-full h-full" quality={quality} />
         
         {/* Emotion indicator */}
         {currentEmotion && (
@@ -378,18 +379,37 @@ export default function Home() {
           <h1 className="text-2xl font-bold text-[#e94560]">Jammo</h1>
           <p className="text-gray-400 text-sm">Your expressive robot companion</p>
           
-          {/* Voice toggle */}
-          <div className="mt-2 flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="voice-toggle"
-              checked={voiceEnabled}
-              onChange={(e) => setVoiceEnabled(e.target.checked)}
-              className="w-4 h-4 accent-[#e94560]"
-            />
-            <label htmlFor="voice-toggle" className="text-gray-400 text-sm cursor-pointer">
-              Voice responses (ElevenLabs)
-            </label>
+          <div className="mt-3 flex flex-col gap-2">
+            {/* Quality selector */}
+            <div className="flex items-center gap-2">
+              <label htmlFor="quality-select" className="text-gray-400 text-sm">
+                Graphics:
+              </label>
+              <select
+                id="quality-select"
+                value={quality}
+                onChange={(e) => setQuality(e.target.value as QualityLevel)}
+                className="bg-[#0f3460] text-gray-200 text-sm rounded px-2 py-1 outline-none focus:ring-1 focus:ring-[#e94560]"
+              >
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </div>
+            
+            {/* Voice toggle */}
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="voice-toggle"
+                checked={voiceEnabled}
+                onChange={(e) => setVoiceEnabled(e.target.checked)}
+                className="w-4 h-4 accent-[#e94560]"
+              />
+              <label htmlFor="voice-toggle" className="text-gray-400 text-sm cursor-pointer">
+                Voice responses (ElevenLabs)
+              </label>
+            </div>
           </div>
         </div>
 
