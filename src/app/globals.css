@@ -36,3 +36,85 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #1a4a7a;
 }
+
+/* ============================================
+   Tide Progress Animations
+   Mindful XP System - "The Flowing Tide"
+   ============================================ */
+
+/* Ripple effect on XP gain */
+@keyframes tide-ripple {
+  0% {
+    transform: scaleY(1);
+    filter: brightness(1);
+  }
+  30% {
+    transform: scaleY(1.03);
+    filter: brightness(1.2);
+  }
+  100% {
+    transform: scaleY(1);
+    filter: brightness(1);
+  }
+}
+
+.animate-tide-ripple {
+  animation: tide-ripple 0.6s ease-out;
+}
+
+/* Rising bubbles within the tide */
+@keyframes tide-bubble {
+  0% {
+    transform: translateY(0) scale(0.8);
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 0.4;
+  }
+  90% {
+    opacity: 0.2;
+  }
+  100% {
+    transform: translateY(-60px) scale(1.1);
+    opacity: 0;
+  }
+}
+
+.animate-tide-bubble {
+  animation: tide-bubble 3s ease-in-out infinite;
+}
+
+/* Gentle shimmer effect at wave crest */
+@keyframes tide-shimmer {
+  0%, 100% {
+    opacity: 0.2;
+    transform: translateX(-100%);
+  }
+  50% {
+    opacity: 0.5;
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-tide-shimmer {
+  animation: tide-shimmer 3s ease-in-out infinite;
+}
+
+/* Subtle glow pulse for full tide celebration */
+@keyframes tide-glow {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(0, 188, 212, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(0, 188, 212, 0.6);
+  }
+}
+
+.animate-tide-glow {
+  animation: tide-glow 2s ease-in-out infinite;
+}

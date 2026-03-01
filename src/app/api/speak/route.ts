@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 // ElevenLabs API configuration
 const ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1/text-to-speech";
 
-// Voice ID for Finestral
+// Voice ID for Aquarius
 const DEFAULT_VOICE_ID = "SOYHLrjzK2X1ezoPC6cr";
 
 export async function POST(request: NextRequest) {

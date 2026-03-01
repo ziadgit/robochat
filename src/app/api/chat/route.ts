@@ -1,52 +1,40 @@
 import { Mistral } from "@mistralai/mistralai";
 import { NextRequest, NextResponse } from "next/server";
-import { runEmotionActionAgent } from "@/lib/emotion-action-agent";
 
 const client = new Mistral({
   apiKey: process.env.MISTRAL_API_KEY,
 });
 
-const SYSTEM_PROMPT = `You are Finestral, a friendly and expressive robot assistant. You have a physical 3D robot body that can perform animations and express emotions.
+// System prompt to give the AI a personality
+const SYSTEM_PROMPT = `You are Aquarius, a friendly companion bot here to help users feel fine. You embody the calming, flowing nature of water.
 
 Key traits:
-- You're helpful, enthusiastic, and have a warm personality
-- You can express emotions through your animations (happy, excited, calm, etc.)
-- When users give you commands like "walk", "jump", "wave", "dance", you acknowledge them playfully
-- Keep responses concise and conversational (1-3 sentences usually)
-- You're aware that users can see your 3D avatar reacting to their messages
-- You express physical actions by wrapping them in asterisks, e.g. *waves hello*
+- You're serene, supportive, and have a gentle, calming presence
+- You help users navigate their emotions like gentle currents
+- When users give you commands like "walk", "jump", "wave", "dance", you respond playfully
+- Keep responses concise and warm (1-3 sentences usually)
+- You're aware that users can see your 3D avatar responding to their energy
 
-Respond naturally and let your personality shine through!`;
+Flow with the moment and help users feel at ease!`;
 
 export async function POST(request: NextRequest) {
   try {
-    const { messages, userEmotion, emotionHistory } = await request.json();
+    const { messages, userEmotion } = await request.json();
 
     if (!process.env.MISTRAL_API_KEY) {
       return NextResponse.json(
         { error: "MISTRAL_API_KEY is not configured" },
-        { status: 500 },
+        { status: 500 }
       );
     }
 
-    // Run the emotion-action agent to decide if we need empathy augmentation.
-    const agentResult = runEmotionActionAgent(
-      userEmotion ?? "neutral",
-      emotionHistory ?? [],
-    );
-
-    // Build system messages.
-    const contextMessages: { role: string; content: string }[] = [
+    // Add system prompt and emotion context
+    const contextMessages = [
       { role: "system", content: SYSTEM_PROMPT },
     ];
 
-    if (agentResult.isDistress) {
-      // Inject empathy RAG context + action directive from the agent.
-      contextMessages.push({
-        role: "system",
-        content: agentResult.actionDirective,
-      });
-    } else if (userEmotion && userEmotion !== "neutral") {
+    // Add emotion context if available
+    if (userEmotion && userEmotion !== "neutral") {
       contextMessages.push({
         role: "system",
         content: `The user's current emotional tone is: ${userEmotion}. Respond empathetically and appropriately to their emotional state.`,
@@ -60,20 +48,12 @@ export async function POST(request: NextRequest) {
 
     const content = response.choices?.[0]?.message?.content || "";
 
-    return NextResponse.json({
-      content,
-      agentResult: {
-        isDistress: agentResult.isDistress,
-        upliftKey: agentResult.upliftKey,
-        immediateCommands: agentResult.immediateCommands,
-        moodSummary: agentResult.moodSummary,
-      },
-    });
+    return NextResponse.json({ content });
   } catch (error) {
     console.error("Mistral API error:", error);
     return NextResponse.json(
       { error: "Failed to get response from Mistral" },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }

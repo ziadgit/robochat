@@ -12,7 +12,7 @@ import CosmicAquarium, { type QualityLevel } from './CosmicAquarium';
 // Re-export QualityLevel for use in other components
 export type { QualityLevel } from './CosmicAquarium';
 
-interface JammoModelProps {
+interface AquariusModelProps {
   currentAnimation: string;
   animationSpeed: number;
   emotionGlow: string | null;
@@ -44,14 +44,14 @@ const ANIMATION_FILES = {
   ],
 };
 
-function JammoModel({ 
+function AquariusModel({ 
   currentAnimation, 
   animationSpeed, 
   emotionGlow, 
   isMoving, 
   movementType,
   onAnimationsLoaded 
-}: JammoModelProps) {
+}: AquariusModelProps) {
   const groupRef = useRef<THREE.Group>(null);
   const mixerRef = useRef<THREE.AnimationMixer | null>(null);
   const currentActionRef = useRef<THREE.AnimationAction | null>(null);
@@ -213,7 +213,7 @@ function JammoModel({
 
     // Fade out current animation
     if (currentActionRef.current) {
-      currentActionRef.current.fadeOut(0.3);
+      currentActionRef.current.fadeOut(0.5);
     }
 
     // Play new animation
@@ -222,7 +222,7 @@ function JammoModel({
     action.timeScale = speed;
     action.loop = loop ? THREE.LoopRepeat : THREE.LoopOnce;
     action.clampWhenFinished = !loop;
-    action.fadeIn(0.3);
+    action.fadeIn(0.5);
     action.play();
 
     currentActionRef.current = action;
@@ -328,7 +328,7 @@ function JammoModel({
 }
 
 // Scene component with cosmic aquarium environment
-interface SceneProps extends JammoModelProps {
+interface SceneProps extends AquariusModelProps {
   quality: QualityLevel;
 }
 
@@ -339,7 +339,7 @@ function Scene({ quality, ...props }: SceneProps) {
       <CosmicAquarium quality={quality} robotAction={props.currentAnimation} />
 
       {/* Robot */}
-      <JammoModel {...props} />
+      <AquariusModel {...props} />
 
       {/* Camera controls */}
       <OrbitControls
@@ -364,9 +364,18 @@ function LoadingFallback() {
   );
 }
 
+// Animation queue item type
+interface QueuedAnimation {
+  mapping: AnimationMapping;
+  duration: number;
+}
+
 // Export interface for controlling the robot
 export interface RobotControllerRef {
   playAnimation: (mapping: AnimationMapping) => void;
+  queueAnimation: (mapping: AnimationMapping, durationMs?: number) => void;
+  playQueueThenIdle: () => void;
+  clearQueue: () => void;
   setEmotion: (glow: string | null) => void;
   startMovement: (type: 'walk' | 'run') => void;
   stopMovement: () => void;
@@ -384,6 +393,11 @@ const Robot3D = forwardRef<RobotControllerRef, Robot3DProps>(function Robot3D({ 
   const [isMoving, setIsMoving] = useState(false);
   const [movementType, setMovementType] = useState<'walk' | 'run' | 'none'>('none');
   const [, setLoadedAnimations] = useState<string[]>([]);
+  
+  // Animation queue system
+  const animationQueueRef = useRef<QueuedAnimation[]>([]);
+  const isPlayingQueueRef = useRef(false);
+  const idleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useImperativeHandle(ref, () => ({
     playAnimation: (mapping: AnimationMapping) => {
@@ -393,6 +407,60 @@ const Robot3D = forwardRef<RobotControllerRef, Robot3DProps>(function Robot3D({ 
         setEmotionGlow(mapping.emotionGlow);
       }
     },
+    
+    queueAnimation: (mapping: AnimationMapping, durationMs = 3000) => {
+      animationQueueRef.current.push({ mapping, duration: durationMs });
+    },
+    
+    playQueueThenIdle: () => {
+      // Don't restart if already playing
+      if (isPlayingQueueRef.current) return;
+      
+      // Nothing to play
+      if (animationQueueRef.current.length === 0) return;
+      
+      // Clear any pending idle timeout
+      if (idleTimeoutRef.current) {
+        clearTimeout(idleTimeoutRef.current);
+        idleTimeoutRef.current = null;
+      }
+      
+      const playNext = () => {
+        if (animationQueueRef.current.length === 0) {
+          // Queue empty - transition to idle after a short delay
+          isPlayingQueueRef.current = false;
+          idleTimeoutRef.current = setTimeout(() => {
+            setCurrentAnimation('a_Idle');
+            setAnimationSpeed(1);
+            setEmotionGlow(null); // Fade out glow
+          }, 500);
+          return;
+        }
+        
+        const { mapping, duration } = animationQueueRef.current.shift()!;
+        setCurrentAnimation(mapping.animation);
+        setAnimationSpeed(mapping.speed || 1);
+        if (mapping.emotionGlow) {
+          setEmotionGlow(mapping.emotionGlow);
+        }
+        
+        // Schedule next animation after this one's duration
+        setTimeout(playNext, duration);
+      };
+      
+      isPlayingQueueRef.current = true;
+      playNext();
+    },
+    
+    clearQueue: () => {
+      animationQueueRef.current = [];
+      if (idleTimeoutRef.current) {
+        clearTimeout(idleTimeoutRef.current);
+        idleTimeoutRef.current = null;
+      }
+      isPlayingQueueRef.current = false;
+    },
+    
     setEmotion: (glow: string | null) => {
       setEmotionGlow(glow);
     },
