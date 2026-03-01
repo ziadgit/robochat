@@ -11,7 +11,15 @@ import {
   getPrimaryAction,
   type ParsedAction,
 } from '@/lib/emotion-mapping';
+import {
+  type TideState,
+  createInitialTideState,
+  calculateXPGain,
+  updateTideState,
+} from '@/lib/tide-system';
+import { isAstrologyQuery } from '@/lib/astrology-detection';
 import type { RobotControllerRef, QualityLevel } from '@/components/Robot3D';
+import TideProgress from '@/components/TideProgress';
 
 // Dynamic import for the 3D component (client-side only)
 const Robot3D = dynamic(() => import('@/components/Robot3D'), { 
@@ -23,18 +31,30 @@ const Robot3D = dynamic(() => import('@/components/Robot3D'), {
   ),
 });
 
+// Citation from astrology web search
+interface Citation {
+  title: string;
+  url: string;
+  favicon?: string;
+  description?: string;
+}
+
 interface Message {
   role: 'user' | 'assistant';
   content: string;
   displayContent?: string;  // Clean content without actions
   actions?: ParsedAction[]; // Parsed actions from response
   emotion?: string;
+  isAstrologyResponse?: boolean; // Whether this came from celestial search
+  citations?: Citation[]; // Web search citations
 }
 
 // Message bubble component with expandable actions
 function MessageBubble({ message }: { message: Message }) {
   const [showActions, setShowActions] = useState(false);
+  const [showCitations, setShowCitations] = useState(false);
   const hasActions = message.actions && message.actions.length > 0;
+  const hasCitations = message.citations && message.citations.length > 0;
   const displayText = message.displayContent || message.content;
   
   return (
@@ -46,12 +66,67 @@ function MessageBubble({ message }: { message: Message }) {
             : 'bg-[#0f3460] text-gray-100'
         }`}
       >
+        {/* Celestial Search indicator */}
+        {message.isAstrologyResponse && (
+          <div className="text-xs text-purple-300 mb-1 flex items-center gap-1">
+            <span>&#10024;</span> Celestial Search
+          </div>
+        )}
+        
         {message.emotion && (
           <div className="text-xs opacity-70 mb-1">
             Feeling: {message.emotion}
           </div>
         )}
         <p className="text-sm">{displayText}</p>
+        
+        {/* Citations section for astrology responses */}
+        {hasCitations && (
+          <div className="mt-2">
+            <button
+              onClick={() => setShowCitations(!showCitations)}
+              className="text-xs text-purple-300 hover:text-purple-200 flex items-center gap-1 transition-colors"
+            >
+              <svg 
+                className={`w-3 h-3 transition-transform ${showCitations ? 'rotate-90' : ''}`} 
+                fill="currentColor" 
+                viewBox="0 0 20 20"
+              >
+                <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+              </svg>
+              {message.citations!.length} source{message.citations!.length > 1 ? 's' : ''}
+            </button>
+            
+            {showCitations && (
+              <div className="mt-2 space-y-2 border-t border-purple-500/20 pt-2">
+                {message.citations!.map((citation, i) => (
+                  <a 
+                    key={i}
+                    href={citation.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block text-xs text-purple-200 hover:text-purple-100 transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      {citation.favicon && (
+                        <img 
+                          src={citation.favicon} 
+                          alt="" 
+                          className="w-4 h-4 rounded"
+                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                        />
+                      )}
+                      <span className="underline">{citation.title}</span>
+                    </div>
+                    {citation.description && (
+                      <p className="mt-1 opacity-70 line-clamp-2">{citation.description}</p>
+                    )}
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         
         {/* Actions indicator and expandable section */}
         {hasActions && (
@@ -103,6 +178,10 @@ export default function Home() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [quality, setQuality] = useState<QualityLevel>('medium');
+  
+  // Mindful XP System - The Flowing Tide
+  const [tideState, setTideState] = useState<TideState>(createInitialTideState());
+  const [tideAnimating, setTideAnimating] = useState(false);
   
   const robotRef = useRef<RobotControllerRef>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -190,58 +269,166 @@ export default function Home() {
 
     // Animate robot based on user's emotion and potential commands
     animateRobot(emotion, text);
+    
+    // Update tide XP - reward engagement and emotional expression
+    const command = detectCommand(text);
+    const { xpGained } = calculateXPGain(tideState, emotion, text, !!command);
+    if (xpGained > 0) {
+      const newTideState = updateTideState(tideState, xpGained, emotion);
+      setTideState(newTideState);
+      
+      // Trigger animation on XP gain
+      setTideAnimating(true);
+      setTimeout(() => setTideAnimating(false), 700);
+    }
 
     try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: [...messages, userMessage].map(m => ({
-            role: m.role,
-            content: m.content,
-          })),
-          userEmotion: emotion,
-        }),
-      });
-
-      const data = await response.json();
+      // Check if this is an astrology query
+      const isAstrology = isAstrologyQuery(text);
       
-      if (data.content) {
-        // Parse the response to extract actions
-        const parsed = parseResponseActions(data.content);
-        
-        const assistantMessage: Message = {
-          role: 'assistant',
-          content: data.content,
-          displayContent: parsed.displayText,
-          actions: parsed.actions,
-        };
-        setMessages(prev => [...prev, assistantMessage]);
+      let assistantMessage: Message;
+      
+      if (isAstrology) {
+        // Use the astrology agent for celestial queries
+        try {
+          const response = await fetch('/api/astrology', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: text }),
+          });
 
-        // If there are parsed actions, use the primary action for animation
-        const primaryAction = getPrimaryAction(parsed.actions);
-        if (primaryAction) {
+          const data = await response.json();
+          
+          if (data.fallback || !data.content) {
+            // Fallback to regular chat if astrology API fails
+            throw new Error('Astrology API fallback triggered');
+          }
+          
+          assistantMessage = {
+            role: 'assistant',
+            content: data.content,
+            displayContent: data.content,
+            isAstrologyResponse: true,
+            citations: data.citations || [],
+          };
+          
+          setMessages(prev => [...prev, assistantMessage]);
+          
+          // Mystical animation for astrology responses
           if (robotRef.current) {
             robotRef.current.playAnimation({
-              animation: primaryAction.animation,
-              emotionGlow: primaryAction.emotionGlow,
+              animation: 'Wave',
+              emotionGlow: '#9b59b6', // Purple for mystical
             });
             robotRef.current.stopMovement();
           }
-        } else {
-          // Fall back to emotion-based animation
-          const responseEmotion = emotion ? getResponseEmotion(emotion) : 'neutral';
-          const responseMapping = getAnimationForInput(responseEmotion as Emotion, null);
           
-          if (robotRef.current) {
-            robotRef.current.playAnimation(responseMapping);
-            robotRef.current.stopMovement();
+          // Speak the response
+          speakText(data.content, 'serene');
+        } catch (astrologyError) {
+          console.warn('Astrology API failed, falling back to regular chat:', astrologyError);
+          // Fall through to regular chat below
+          const response = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              messages: [...messages, userMessage].map(m => ({
+                role: m.role,
+                content: m.content,
+              })),
+              userEmotion: emotion,
+            }),
+          });
+
+          const data = await response.json();
+          
+          if (data.content) {
+            const parsed = parseResponseActions(data.content);
+            
+            assistantMessage = {
+              role: 'assistant',
+              content: data.content,
+              displayContent: parsed.displayText,
+              actions: parsed.actions,
+            };
+            setMessages(prev => [...prev, assistantMessage]);
+
+            const primaryAction = getPrimaryAction(parsed.actions);
+            if (primaryAction) {
+              if (robotRef.current) {
+                robotRef.current.playAnimation({
+                  animation: primaryAction.animation,
+                  emotionGlow: primaryAction.emotionGlow,
+                });
+                robotRef.current.stopMovement();
+              }
+            } else {
+              const responseEmotion = emotion ? getResponseEmotion(emotion) : 'neutral';
+              const responseMapping = getAnimationForInput(responseEmotion as Emotion, null);
+              
+              if (robotRef.current) {
+                robotRef.current.playAnimation(responseMapping);
+                robotRef.current.stopMovement();
+              }
+            }
+
+            const responseEmotion = emotion ? getResponseEmotion(emotion) : 'neutral';
+            speakText(parsed.spokenText, responseEmotion);
           }
         }
+      } else {
+        // Regular chat for non-astrology queries
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: [...messages, userMessage].map(m => ({
+              role: m.role,
+              content: m.content,
+            })),
+            userEmotion: emotion,
+          }),
+        });
 
-        // Speak the clean response (without action text)
-        const responseEmotion = emotion ? getResponseEmotion(emotion) : 'neutral';
-        speakText(parsed.spokenText, responseEmotion);
+        const data = await response.json();
+        
+        if (data.content) {
+          // Parse the response to extract actions
+          const parsed = parseResponseActions(data.content);
+          
+          assistantMessage = {
+            role: 'assistant',
+            content: data.content,
+            displayContent: parsed.displayText,
+            actions: parsed.actions,
+          };
+          setMessages(prev => [...prev, assistantMessage]);
+
+          // If there are parsed actions, use the primary action for animation
+          const primaryAction = getPrimaryAction(parsed.actions);
+          if (primaryAction) {
+            if (robotRef.current) {
+              robotRef.current.playAnimation({
+                animation: primaryAction.animation,
+                emotionGlow: primaryAction.emotionGlow,
+              });
+              robotRef.current.stopMovement();
+            }
+          } else {
+            // Fall back to emotion-based animation
+            const responseEmotion = emotion ? getResponseEmotion(emotion) : 'neutral';
+            const responseMapping = getAnimationForInput(responseEmotion as Emotion, null);
+            
+            if (robotRef.current) {
+              robotRef.current.playAnimation(responseMapping);
+              robotRef.current.stopMovement();
+            }
+          }
+
+          // Speak the clean response (without action text)
+          const responseEmotion = emotion ? getResponseEmotion(emotion) : 'neutral';
+          speakText(parsed.spokenText, responseEmotion);
+        }
       }
     } catch (error) {
       console.error('Chat error:', error);
@@ -379,6 +566,14 @@ export default function Home() {
           <h1 className="text-2xl font-bold text-[#e94560]">Aquarius</h1>
           <p className="text-gray-400 text-sm">A fin-astral companion that helps you feel fine</p>
           
+          {/* Tide Progress - Mindful XP Visualization */}
+          <TideProgress 
+            percentage={tideState.percentage}
+            statusPhrase={tideState.statusPhrase}
+            isAnimating={tideAnimating}
+            showFullTideCelebration={tideState.reachedFullTide}
+          />
+          
           <div className="mt-3 flex flex-col gap-2">
             {/* Quality selector */}
             <div className="flex items-center gap-2">
@@ -499,6 +694,14 @@ export default function Home() {
                 {cmd}
               </button>
             ))}
+            {/* Celestial Search Test Button */}
+            <button
+              onClick={() => sendMessage("What's happening with mercury retrograde right now in 2026?")}
+              disabled={isLoading}
+              className="px-3 py-1 text-xs bg-purple-900 text-purple-200 rounded-full hover:bg-purple-800 transition-colors flex items-center gap-1"
+            >
+              <span>&#10024;</span> Celestial
+            </button>
           </div>
         </div>
       </div>
