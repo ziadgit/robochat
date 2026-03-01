@@ -17,17 +17,41 @@ import {
   calculateXPGain,
   updateTideState,
 } from '@/lib/tide-system';
+import {
+  type GameState,
+  isWarpSecretCommand,
+  isWarpHomeCommand,
+  detectGameCommand,
+  createInitialGameState,
+  moveRobot,
+  magicMoveToOrb,
+  collectOrb,
+  getCollectableOrb,
+  playWarpSound,
+  playCollectSound,
+  GAME_MESSAGES,
+} from '@/lib/secret-world';
 import { isAstrologyQuery } from '@/lib/astrology-detection';
 import { isNewsQuery } from '@/lib/news-detection';
 import type { RobotControllerRef, QualityLevel } from '@/components/Robot3D';
+import type { SkyIslandRef } from '@/components/SkyIsland';
 import TideProgress from '@/components/TideProgress';
 
-// Dynamic import for the 3D component (client-side only)
+// Dynamic import for the 3D components (client-side only)
 const Robot3D = dynamic(() => import('@/components/Robot3D'), { 
   ssr: false,
   loading: () => (
     <div className="flex items-center justify-center h-full bg-gradient-to-br from-[#1a1a2e] to-[#16213e]">
       <div className="text-white text-lg animate-pulse">Loading Aquarius...</div>
+    </div>
+  ),
+});
+
+const SkyIsland = dynamic(() => import('@/components/SkyIsland'), {
+  ssr: false,
+  loading: () => (
+    <div className="flex items-center justify-center h-full bg-gradient-to-br from-[#1a0a2e] to-[#0a0a1a]">
+      <div className="text-cyan-300 text-lg animate-pulse">Warping to Sky Island...</div>
     </div>
   ),
 });
@@ -192,7 +216,14 @@ export default function Home() {
   const [tideState, setTideState] = useState<TideState>(createInitialTideState());
   const [tideAnimating, setTideAnimating] = useState(false);
   
+  // Secret World - Sky Island
+  const [currentWorld, setCurrentWorld] = useState<'main' | 'skyIsland'>('main');
+  const [gameState, setGameState] = useState<GameState | null>(null);
+  const [isFading, setIsFading] = useState(false);
+  const [fadeDirection, setFadeDirection] = useState<'in' | 'out'>('in');
+  
   const robotRef = useRef<RobotControllerRef>(null);
+  const skyIslandRef = useRef<SkyIslandRef>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -252,7 +283,9 @@ export default function Home() {
     const mapping = getAnimationForInput(emotion, command);
     
     if (robotRef.current) {
-      robotRef.current.playAnimation(mapping);
+      // Queue the animation with 7 second duration
+      robotRef.current.queueAnimation(mapping, 7000);
+      robotRef.current.playQueueThenIdle();
       
       if (mapping.movement && mapping.movement !== 'none') {
         robotRef.current.startMovement(mapping.movement);
@@ -262,9 +295,171 @@ export default function Home() {
     }
   }, []);
 
+  // Warp to Sky Island
+  const warpToSkyIsland = useCallback(() => {
+    playWarpSound();
+    setIsFading(true);
+    setFadeDirection('in');
+    
+    setTimeout(() => {
+      setCurrentWorld('skyIsland');
+      setGameState(createInitialGameState());
+      setFadeDirection('out');
+      
+      setTimeout(() => {
+        setIsFading(false);
+        // Send welcome message
+        const welcomeMessage: Message = {
+          role: 'assistant',
+          content: GAME_MESSAGES.welcome,
+          displayContent: GAME_MESSAGES.welcome,
+        };
+        setMessages(prev => [...prev, welcomeMessage]);
+        speakText(GAME_MESSAGES.welcome, 'excited');
+      }, 300);
+    }, 300);
+  }, [speakText]);
+
+  // Warp back home
+  const warpHome = useCallback(() => {
+    playWarpSound();
+    setIsFading(true);
+    setFadeDirection('in');
+    
+    setTimeout(() => {
+      setCurrentWorld('main');
+      setGameState(null);
+      setFadeDirection('out');
+      
+      setTimeout(() => {
+        setIsFading(false);
+        const returnMessage: Message = {
+          role: 'assistant',
+          content: GAME_MESSAGES.returnHome,
+          displayContent: GAME_MESSAGES.returnHome,
+        };
+        setMessages(prev => [...prev, returnMessage]);
+        speakText(GAME_MESSAGES.returnHome, 'calm');
+      }, 300);
+    }, 300);
+  }, [speakText]);
+
+  // Handle game commands in Sky Island
+  const handleGameCommand = useCallback((text: string) => {
+    if (!gameState) return false;
+    
+    const command = detectGameCommand(text);
+    if (!command) return false;
+    
+    let newGameState = gameState;
+    let responseMessage = '';
+    
+    switch (command) {
+      case 'left':
+      case 'right':
+      case 'forward':
+      case 'back':
+        newGameState = moveRobot(gameState, command);
+        responseMessage = GAME_MESSAGES.moving;
+        if (skyIslandRef.current) {
+          skyIslandRef.current.playAnimation('a_Walking');
+        }
+        break;
+        
+      case 'magic':
+        newGameState = magicMoveToOrb(gameState);
+        responseMessage = GAME_MESSAGES.magic;
+        if (skyIslandRef.current) {
+          skyIslandRef.current.playAnimation('a_Walking');
+        }
+        break;
+        
+      case 'collect':
+        const collectableOrb = getCollectableOrb(gameState);
+        if (collectableOrb) {
+          newGameState = collectOrb(gameState, collectableOrb.id);
+          playCollectSound();
+          
+          if (newGameState.completed) {
+            responseMessage = GAME_MESSAGES.allCollected;
+            // Award XP bonus
+            const newTideState = updateTideState(tideState, 50, 'excited');
+            setTideState(newTideState);
+            setTideAnimating(true);
+            setTimeout(() => setTideAnimating(false), 700);
+            
+            if (skyIslandRef.current) {
+              skyIslandRef.current.celebrateVictory();
+            }
+          } else {
+            responseMessage = GAME_MESSAGES.collected;
+            // Check if near another orb
+            const nextOrb = getCollectableOrb(newGameState);
+            if (nextOrb) {
+              responseMessage += ' ' + GAME_MESSAGES.nearOrb;
+            }
+          }
+        } else {
+          responseMessage = GAME_MESSAGES.noOrbs;
+        }
+        break;
+    }
+    
+    setGameState(newGameState);
+    
+    // Check if near an orb after moving
+    if (['left', 'right', 'forward', 'back', 'magic'].includes(command)) {
+      const nearbyOrb = getCollectableOrb(newGameState);
+      if (nearbyOrb) {
+        responseMessage = GAME_MESSAGES.nearOrb;
+      }
+    }
+    
+    if (responseMessage) {
+      const assistantMessage: Message = {
+        role: 'assistant',
+        content: responseMessage,
+        displayContent: responseMessage,
+      };
+      setMessages(prev => [...prev, assistantMessage]);
+      speakText(responseMessage, 'happy');
+    }
+    
+    return true;
+  }, [gameState, tideState, speakText]);
+
   // Send message to chat API
   const sendMessage = async (text: string, emotion: Emotion | null = null) => {
     if (!text.trim() || isLoading) return;
+
+    // Check for warp commands first (highest priority)
+    if (isWarpSecretCommand(text)) {
+      const userMessage: Message = { role: 'user', content: text };
+      setMessages(prev => [...prev, userMessage]);
+      setInput('');
+      warpToSkyIsland();
+      return;
+    }
+    
+    if (isWarpHomeCommand(text) && currentWorld === 'skyIsland') {
+      const userMessage: Message = { role: 'user', content: text };
+      setMessages(prev => [...prev, userMessage]);
+      setInput('');
+      warpHome();
+      return;
+    }
+    
+    // Handle game commands when in Sky Island
+    if (currentWorld === 'skyIsland' && gameState) {
+      const userMessage: Message = { role: 'user', content: text };
+      setMessages(prev => [...prev, userMessage]);
+      setInput('');
+      
+      const handled = handleGameCommand(text);
+      if (handled) return;
+      
+      // If not a game command, still allow chat but with a game-aware response
+    }
 
     const userMessage: Message = { 
       role: 'user', 
@@ -327,10 +522,11 @@ export default function Home() {
           
           // Mystical animation for astrology responses
           if (robotRef.current) {
-            robotRef.current.playAnimation({
+            robotRef.current.queueAnimation({
               animation: 'Wave',
               emotionGlow: '#9b59b6', // Purple for mystical
-            });
+            }, 7000);
+            robotRef.current.playQueueThenIdle();
             robotRef.current.stopMovement();
           }
           
@@ -367,10 +563,11 @@ export default function Home() {
             const primaryAction = getPrimaryAction(parsed.actions);
             if (primaryAction) {
               if (robotRef.current) {
-                robotRef.current.playAnimation({
+                robotRef.current.queueAnimation({
                   animation: primaryAction.animation,
                   emotionGlow: primaryAction.emotionGlow,
-                });
+                }, 7000);
+                robotRef.current.playQueueThenIdle();
                 robotRef.current.stopMovement();
               }
             } else {
@@ -378,7 +575,8 @@ export default function Home() {
               const responseMapping = getAnimationForInput(responseEmotion as Emotion, null);
               
               if (robotRef.current) {
-                robotRef.current.playAnimation(responseMapping);
+                robotRef.current.queueAnimation(responseMapping, 7000);
+                robotRef.current.playQueueThenIdle();
                 robotRef.current.stopMovement();
               }
             }
@@ -417,10 +615,11 @@ export default function Home() {
           
           // Calm animation for news responses
           if (robotRef.current) {
-            robotRef.current.playAnimation({
+            robotRef.current.queueAnimation({
               animation: 'Idle',
               emotionGlow: '#3498db', // Blue for news
-            });
+            }, 7000);
+            robotRef.current.playQueueThenIdle();
             robotRef.current.stopMovement();
           }
           
@@ -457,10 +656,11 @@ export default function Home() {
             const primaryAction = getPrimaryAction(parsed.actions);
             if (primaryAction) {
               if (robotRef.current) {
-                robotRef.current.playAnimation({
+                robotRef.current.queueAnimation({
                   animation: primaryAction.animation,
                   emotionGlow: primaryAction.emotionGlow,
-                });
+                }, 7000);
+                robotRef.current.playQueueThenIdle();
                 robotRef.current.stopMovement();
               }
             } else {
@@ -468,7 +668,8 @@ export default function Home() {
               const responseMapping = getAnimationForInput(responseEmotion as Emotion, null);
               
               if (robotRef.current) {
-                robotRef.current.playAnimation(responseMapping);
+                robotRef.current.queueAnimation(responseMapping, 7000);
+                robotRef.current.playQueueThenIdle();
                 robotRef.current.stopMovement();
               }
             }
@@ -506,22 +707,24 @@ export default function Home() {
           setMessages(prev => [...prev, assistantMessage]);
 
           // If there are parsed actions, use the primary action for animation
-          const primaryAction = getPrimaryAction(parsed.actions);
-          if (primaryAction) {
-            if (robotRef.current) {
-              robotRef.current.playAnimation({
-                animation: primaryAction.animation,
-                emotionGlow: primaryAction.emotionGlow,
-              });
-              robotRef.current.stopMovement();
-            }
+            const primaryAction = getPrimaryAction(parsed.actions);
+            if (primaryAction) {
+              if (robotRef.current) {
+                robotRef.current.queueAnimation({
+                  animation: primaryAction.animation,
+                  emotionGlow: primaryAction.emotionGlow,
+                }, 7000);
+                robotRef.current.playQueueThenIdle();
+                robotRef.current.stopMovement();
+              }
           } else {
             // Fall back to emotion-based animation
             const responseEmotion = emotion ? getResponseEmotion(emotion) : 'neutral';
             const responseMapping = getAnimationForInput(responseEmotion as Emotion, null);
             
             if (robotRef.current) {
-              robotRef.current.playAnimation(responseMapping);
+              robotRef.current.queueAnimation(responseMapping, 7000);
+              robotRef.current.playQueueThenIdle();
               robotRef.current.stopMovement();
             }
           }
@@ -641,9 +844,22 @@ export default function Home() {
 
   return (
     <div className="flex h-screen bg-[#1a1a2e]">
-      {/* 3D Robot Viewer */}
+      {/* Warp Transition Overlay */}
+      {isFading && (
+        <div 
+          className={`fixed inset-0 bg-white z-50 transition-opacity duration-300 ${
+            fadeDirection === 'in' ? 'opacity-100' : 'opacity-0'
+          }`}
+        />
+      )}
+      
+      {/* 3D Robot Viewer / Sky Island */}
       <div className="flex-1 relative">
-        <Robot3D ref={robotRef} className="w-full h-full" quality={quality} />
+        {currentWorld === 'main' ? (
+          <Robot3D ref={robotRef} className="w-full h-full" quality={quality} />
+        ) : (
+          gameState && <SkyIsland ref={skyIslandRef} gameState={gameState} className="w-full h-full" />
+        )}
         
         {/* Emotion indicator */}
         {currentEmotion && (
@@ -656,6 +872,29 @@ export default function Home() {
         {isSpeaking && (
           <div className="absolute top-4 right-4 px-3 py-1 bg-[#4caf50] text-white rounded-full text-sm font-medium animate-pulse">
             Speaking...
+          </div>
+        )}
+        
+        {/* Sky Island Game UI */}
+        {currentWorld === 'skyIsland' && gameState && (
+          <div className="absolute top-4 left-4 flex flex-col gap-2">
+            {/* Orb counter */}
+            <div className="px-4 py-2 bg-[#1a0a2e]/90 backdrop-blur-sm rounded-lg border border-cyan-500/30">
+              <div className="text-cyan-300 text-sm font-medium flex items-center gap-2">
+                <span className="text-lg">✨</span>
+                Orbs: {gameState.orbsCollected} / {gameState.totalOrbs}
+              </div>
+              {gameState.completed && (
+                <div className="text-yellow-300 text-xs mt-1 animate-pulse">
+                  All collected! +50 XP
+                </div>
+              )}
+            </div>
+            
+            {/* Game hint */}
+            <div className="px-3 py-1.5 bg-[#1a0a2e]/70 backdrop-blur-sm rounded-lg text-xs text-gray-300 max-w-[200px]">
+              Say: &ldquo;magic&rdquo; to find orbs, &ldquo;collect&rdquo; when near
+            </div>
           </div>
         )}
       </div>
@@ -785,32 +1024,80 @@ export default function Home() {
           
           {/* Quick Commands */}
           <div className="mt-3 flex flex-wrap gap-2">
-            {['wave', 'jump', 'dance', 'walk'].map((cmd) => (
-              <button
-                key={cmd}
-                onClick={() => sendMessage(cmd)}
-                disabled={isLoading}
-                className="px-3 py-1 text-xs bg-[#0f3460] text-gray-300 rounded-full hover:bg-[#1a4a7a] transition-colors capitalize"
-              >
-                {cmd}
-              </button>
-            ))}
-            {/* Celestial Search Test Button */}
-            <button
-              onClick={() => sendMessage("What's happening with mercury retrograde right now in 2026?")}
-              disabled={isLoading}
-              className="px-3 py-1 text-xs bg-purple-900 text-purple-200 rounded-full hover:bg-purple-800 transition-colors flex items-center gap-1"
-            >
-              <span>&#10024;</span> Celestial
-            </button>
-            {/* News Update Button */}
-            <button
-              onClick={() => sendMessage("What's happening in the news today?")}
-              disabled={isLoading}
-              className="px-3 py-1 text-xs bg-blue-900 text-blue-200 rounded-full hover:bg-blue-800 transition-colors flex items-center gap-1"
-            >
-              <span>📰</span> News
-            </button>
+            {currentWorld === 'main' ? (
+              <>
+                {['wave', 'jump', 'dance', 'walk'].map((cmd) => (
+                  <button
+                    key={cmd}
+                    onClick={() => sendMessage(cmd)}
+                    disabled={isLoading}
+                    className="px-3 py-1 text-xs bg-[#0f3460] text-gray-300 rounded-full hover:bg-[#1a4a7a] transition-colors capitalize"
+                  >
+                    {cmd}
+                  </button>
+                ))}
+                {/* Celestial Search Test Button */}
+                <button
+                  onClick={() => sendMessage("What's happening with mercury retrograde right now in 2026?")}
+                  disabled={isLoading}
+                  className="px-3 py-1 text-xs bg-purple-900 text-purple-200 rounded-full hover:bg-purple-800 transition-colors flex items-center gap-1"
+                >
+                  <span>&#10024;</span> Celestial
+                </button>
+                {/* News Update Button */}
+                <button
+                  onClick={() => sendMessage("What's happening in the news today?")}
+                  disabled={isLoading}
+                  className="px-3 py-1 text-xs bg-blue-900 text-blue-200 rounded-full hover:bg-blue-800 transition-colors flex items-center gap-1"
+                >
+                  <span>📰</span> News
+                </button>
+                {/* Secret World Button */}
+                <button
+                  onClick={() => sendMessage("warp secret")}
+                  disabled={isLoading}
+                  className="px-3 py-1 text-xs bg-cyan-900 text-cyan-200 rounded-full hover:bg-cyan-800 transition-colors flex items-center gap-1"
+                >
+                  <span>🏝️</span> Secret
+                </button>
+              </>
+            ) : (
+              <>
+                {/* Sky Island Commands */}
+                <button
+                  onClick={() => sendMessage("magic")}
+                  disabled={isLoading}
+                  className="px-3 py-1 text-xs bg-cyan-800 text-cyan-100 rounded-full hover:bg-cyan-700 transition-colors flex items-center gap-1"
+                >
+                  ✨ Magic
+                </button>
+                <button
+                  onClick={() => sendMessage("collect")}
+                  disabled={isLoading}
+                  className="px-3 py-1 text-xs bg-yellow-800 text-yellow-100 rounded-full hover:bg-yellow-700 transition-colors flex items-center gap-1"
+                >
+                  🔮 Collect
+                </button>
+                {['left', 'right', 'forward'].map((dir) => (
+                  <button
+                    key={dir}
+                    onClick={() => sendMessage(`go ${dir}`)}
+                    disabled={isLoading}
+                    className="px-3 py-1 text-xs bg-[#0f3460] text-gray-300 rounded-full hover:bg-[#1a4a7a] transition-colors capitalize"
+                  >
+                    {dir}
+                  </button>
+                ))}
+                {/* Return Home Button */}
+                <button
+                  onClick={() => sendMessage("warp home")}
+                  disabled={isLoading}
+                  className="px-3 py-1 text-xs bg-indigo-800 text-indigo-100 rounded-full hover:bg-indigo-700 transition-colors flex items-center gap-1"
+                >
+                  🏠 Home
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>
