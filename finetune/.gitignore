@@ -1,0 +1,8 @@
+.env
+data/
+output/
+eval_audio/
+__pycache__/
+*.pyc
+wandb/
+venv/

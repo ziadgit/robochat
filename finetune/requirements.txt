@@ -1,0 +1,8 @@
+datasets
+mistralai
+torch
+transformers
+peft
+trl
+wandb
+bitsandbytes
