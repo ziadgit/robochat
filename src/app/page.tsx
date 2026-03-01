@@ -18,6 +18,7 @@ import {
   updateTideState,
 } from '@/lib/tide-system';
 import { isAstrologyQuery } from '@/lib/astrology-detection';
+import { isNewsQuery } from '@/lib/news-detection';
 import type { RobotControllerRef, QualityLevel } from '@/components/Robot3D';
 import TideProgress from '@/components/TideProgress';
 
@@ -46,6 +47,7 @@ interface Message {
   actions?: ParsedAction[]; // Parsed actions from response
   emotion?: string;
   isAstrologyResponse?: boolean; // Whether this came from celestial search
+  isNewsResponse?: boolean; // Whether this came from news search
   citations?: Citation[]; // Web search citations
 }
 
@@ -70,6 +72,13 @@ function MessageBubble({ message }: { message: Message }) {
         {message.isAstrologyResponse && (
           <div className="text-xs text-purple-300 mb-1 flex items-center gap-1">
             <span>&#10024;</span> Celestial Search
+          </div>
+        )}
+        
+        {/* News Update indicator */}
+        {message.isNewsResponse && (
+          <div className="text-xs text-blue-300 mb-1 flex items-center gap-1">
+            <span>📰</span> News Update
           </div>
         )}
         
@@ -283,8 +292,10 @@ export default function Home() {
     }
 
     try {
-      // Check if this is an astrology query
+      // Check if this is an astrology or news query
+      // Priority: Astrology > News > Regular chat
       const isAstrology = isAstrologyQuery(text);
+      const isNews = !isAstrology && isNewsQuery(text);
       
       let assistantMessage: Message;
       
@@ -327,6 +338,96 @@ export default function Home() {
           speakText(data.content, 'serene');
         } catch (astrologyError) {
           console.warn('Astrology API failed, falling back to regular chat:', astrologyError);
+          // Fall through to regular chat below
+          const response = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              messages: [...messages, userMessage].map(m => ({
+                role: m.role,
+                content: m.content,
+              })),
+              userEmotion: emotion,
+            }),
+          });
+
+          const data = await response.json();
+          
+          if (data.content) {
+            const parsed = parseResponseActions(data.content);
+            
+            assistantMessage = {
+              role: 'assistant',
+              content: data.content,
+              displayContent: parsed.displayText,
+              actions: parsed.actions,
+            };
+            setMessages(prev => [...prev, assistantMessage]);
+
+            const primaryAction = getPrimaryAction(parsed.actions);
+            if (primaryAction) {
+              if (robotRef.current) {
+                robotRef.current.playAnimation({
+                  animation: primaryAction.animation,
+                  emotionGlow: primaryAction.emotionGlow,
+                });
+                robotRef.current.stopMovement();
+              }
+            } else {
+              const responseEmotion = emotion ? getResponseEmotion(emotion) : 'neutral';
+              const responseMapping = getAnimationForInput(responseEmotion as Emotion, null);
+              
+              if (robotRef.current) {
+                robotRef.current.playAnimation(responseMapping);
+                robotRef.current.stopMovement();
+              }
+            }
+
+            const responseEmotion = emotion ? getResponseEmotion(emotion) : 'neutral';
+            speakText(parsed.spokenText, responseEmotion);
+          }
+        }
+      } else if (isNews) {
+        // Use the news agent for current events queries
+        try {
+          const response = await fetch('/api/news', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: text }),
+          });
+
+          const data = await response.json();
+          
+          console.log('News API response in frontend:', { content: data.content?.slice(0, 50), citations: data.citations });
+          
+          if (data.fallback || !data.content) {
+            // Fallback to regular chat if news API fails
+            throw new Error('News API fallback triggered');
+          }
+          
+          assistantMessage = {
+            role: 'assistant',
+            content: data.content,
+            displayContent: data.content,
+            isNewsResponse: true,
+            citations: data.citations || [],
+          };
+          
+          setMessages(prev => [...prev, assistantMessage]);
+          
+          // Calm animation for news responses
+          if (robotRef.current) {
+            robotRef.current.playAnimation({
+              animation: 'Idle',
+              emotionGlow: '#3498db', // Blue for news
+            });
+            robotRef.current.stopMovement();
+          }
+          
+          // Speak the response
+          speakText(data.content, 'calm');
+        } catch (newsError) {
+          console.warn('News API failed, falling back to regular chat:', newsError);
           // Fall through to regular chat below
           const response = await fetch('/api/chat', {
             method: 'POST',
@@ -701,6 +802,14 @@ export default function Home() {
               className="px-3 py-1 text-xs bg-purple-900 text-purple-200 rounded-full hover:bg-purple-800 transition-colors flex items-center gap-1"
             >
               <span>&#10024;</span> Celestial
+            </button>
+            {/* News Update Button */}
+            <button
+              onClick={() => sendMessage("What's happening in the news today?")}
+              disabled={isLoading}
+              className="px-3 py-1 text-xs bg-blue-900 text-blue-200 rounded-full hover:bg-blue-800 transition-colors flex items-center gap-1"
+            >
+              <span>📰</span> News
             </button>
           </div>
         </div>
