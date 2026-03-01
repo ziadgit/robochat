@@ -16,9 +16,9 @@ When Jammo detects stress, it doesn't send a text bubble. It gets up and dances.
 
 73% of developers report burnout symptoms. They cope the way they know how: open another tab, type into another text box, scroll another feed. The intervention is indistinguishable from the problem.
 
-Jammo takes a different route. Voice in, body out. You talk; the robot listens to *how* you say it -- not just what. It reads stress in a steady voice that says "I'm fine." It catches frustration buried under polite words. And it responds the way a good friend would: not with a paragraph, but by doing something -- physically moving, cracking a joke with its whole body, or telling you there's a ramen competition happening across town this Saturday.
+Finestral takes a different route. You talk; the robot listens to *how* you say it -- not just what. When you are stressed, even if you say "I'm fine," it catches frustration underneath and responds the way a good friend would: not with a paragraph, but by doing something -- physically moving, cracking a joke with its whole body, or telling you there's a ramen competition happening across town this Saturday.
 
-The insight is simple: embodied response outperforms text. A dancing robot breaks a negative spiral faster than a chatbot paragraph ever could.
+A character that dances to cheer you up and searches for latest happenings, suggesting you head out to a food festival, can help you break out of a negative spiral.
 
 ---
 
@@ -116,17 +116,17 @@ Every module is independently swappable. The agent doesn't care whether actions 
 
 ---
 
-## The Empathy Agent
+## The Empathy Engine
 
 Not a chatbot with a friendly system prompt. A four-stage autonomous pipeline:
 
 ### 1. Classify
 
-The agent evaluates each detected emotion against a distress set: `stressed`, `sad`, `angry`, `frustrated`, `anxious`, `confused`. Non-distress emotions (happy, calm, confident, excited) flow through the standard animation pipeline untouched. No unnecessary intervention.
+The engine evaluates each detected emotion against a distress set: `stressed`, `sad`, `angry`, `frustrated`, `anxious`, `confused`. Non-distress emotions (happy, calm, confident, excited) flow through the standard animation pipeline untouched. No unnecessary intervention.
 
 ### 2. Retrieve (RAG)
 
-On distress detection, the agent queries a structured therapeutic knowledge base containing:
+On distress detection, the engine queries a structured therapeutic knowledge base containing:
 
 - **CBT techniques** -- cognitive restructuring, thought challenging, behavioral activation, decatastrophizing
 - **Grounding exercises** -- 5-4-3-2-1 sensory grounding, box breathing, body scan
@@ -136,7 +136,7 @@ Each emotion maps to a curated subset. `anxious` retrieves decatastrophizing + 5
 
 ### 3. Decide
 
-The agent selects an action sequence calibrated to the specific emotion:
+The engine selects an action sequence calibrated to the specific emotion:
 
 | Emotion | Uplift Strategy | Robot Actions |
 |---|---|---|
@@ -147,6 +147,10 @@ The agent selects an action sequence calibrated to the specific emotion:
 | Confused | Energize | Jump, victory pose |
 
 The first action fires **immediately** -- before the LLM response arrives -- so the user sees a physical reaction within milliseconds of speaking.
+
+| ![Wave](assets/wave.gif) | ![Walk](assets/walk.gif) |
+|:---:|:---:|
+| Wave | Walk |
 
 ### 4. Augment
 
@@ -160,7 +164,7 @@ The result: responses that reference specific CBT steps, acknowledge mood shifts
 
 ### Emotion Memory
 
-The agent tracks emotion history across the full conversation. `checkMoodTrend()` detects trajectory shifts:
+The engine tracks emotion history across the full conversation. `checkMoodTrend()` detects trajectory shifts:
 
 - `stressed → stressed → calm` -- "Positive shift. Things are moving in a good direction."
 - `calm → anxious → frustrated` -- "Mood dipped. Worth checking what changed."
