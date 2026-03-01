@@ -30,9 +30,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Run the emotion-action agent to decide if we need empathy augmentation.
-    const agentResult = runEmotionActionAgent(
+    const latestUserMsg = messages?.length
+      ? messages[messages.length - 1]?.content
+      : undefined;
+    const agentResult = await runEmotionActionAgent(
       userEmotion ?? "neutral",
       emotionHistory ?? [],
+      latestUserMsg,
     );
 
     // Build system messages.

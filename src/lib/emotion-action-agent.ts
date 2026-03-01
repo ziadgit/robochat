@@ -17,6 +17,7 @@ import {
   checkMoodTrend,
   type Technique,
 } from "./empathy-knowledge";
+import { semanticRetrieve, ensureInitialized } from "./embedding-store";
 
 // Emotions that should trigger the uplifting-action flow.
 const DISTRESS_EMOTIONS = new Set<string>([
@@ -90,13 +91,39 @@ export interface AgentResult {
 // The agent
 // ---------------------------------------------------------------------------
 
+// Start pre-embedding techniques on module load (non-blocking).
+ensureInitialized().catch(() => {});
+
+const WORD_THRESHOLD = 12;
+const SUSTAINED_DISTRESS_COUNT = 2;
+
+function needsSemanticRAG(
+  emotionHistory: string[],
+  userMessage?: string,
+): boolean {
+  if (!userMessage) return false;
+  // Long or nuanced messages benefit from semantic matching.
+  if (userMessage.split(/\s+/).length >= WORD_THRESHOLD) return true;
+  // Sustained distress — the deterministic map may repeat the same techniques.
+  const recentDistress = emotionHistory
+    .slice(-SUSTAINED_DISTRESS_COUNT)
+    .filter((e) => DISTRESS_EMOTIONS.has(e.toLowerCase()));
+  if (recentDistress.length >= SUSTAINED_DISTRESS_COUNT) return true;
+  return false;
+}
+
 /**
- * Run the emotion-action agent. Pure function, no API calls.
+ * Run the emotion-action agent.
+ *
+ * Defaults to fast deterministic retrieval. Routes to Mistral Embed semantic
+ * RAG when the situation is complex enough to benefit (long messages or
+ * sustained distress). Falls back to deterministic lookup on any failure.
  */
-export function runEmotionActionAgent(
+export async function runEmotionActionAgent(
   emotion: Emotion | string,
   emotionHistory: string[],
-): AgentResult {
+  userMessage?: string,
+): Promise<AgentResult> {
   const emotionLower = emotion.toLowerCase();
   const isDistress = DISTRESS_EMOTIONS.has(emotionLower);
 
@@ -112,8 +139,21 @@ export function runEmotionActionAgent(
     };
   }
 
-  // Step 2: Retrieve relevant empathy techniques
-  const techniques = retrieveForEmotion(emotionLower);
+  // Step 2: Retrieve — route to semantic RAG only when warranted.
+  let techniques: Technique[];
+  if (needsSemanticRAG(emotionHistory, userMessage)) {
+    try {
+      const query = `${emotionLower}: ${userMessage}`;
+      techniques = await semanticRetrieve(query, 3);
+    } catch {
+      techniques = retrieveForEmotion(emotionLower);
+    }
+    if (techniques.length === 0) {
+      techniques = retrieveForEmotion(emotionLower);
+    }
+  } else {
+    techniques = retrieveForEmotion(emotionLower);
+  }
   const techniqueContext = formatTechniquesForPrompt(techniques);
   const moodSummary = checkMoodTrend(emotionHistory);
 

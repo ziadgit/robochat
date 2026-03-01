@@ -188,8 +188,14 @@ const EMOTION_TECHNIQUE_MAP: Record<string, string[]> = {
 // Retrieval helpers
 // ---------------------------------------------------------------------------
 
+const ALL_STORES = [CBT_TECHNIQUES, GROUNDING_EXERCISES, TECH_STRESS] as const;
+
+export function getAllTechniques(): [string, Technique][] {
+  return ALL_STORES.flatMap((s) => Object.entries(s));
+}
+
 function lookup(key: string): Technique | null {
-  for (const store of [CBT_TECHNIQUES, GROUNDING_EXERCISES, TECH_STRESS]) {
+  for (const store of ALL_STORES) {
     if (key in store) return store[key];
   }
   return null;
